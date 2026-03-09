@@ -1,0 +1,56 @@
+@startuml C3_ML_Platform_Cloud
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C3 - ML Platform (Cloud-First)\nЦентрализованная ML платформа
+
+Container_Boundary(ml_platform, "ML Platform") {
+    Component(model_server, "Model Server", "TensorFlow Serving", "Сервинг ML моделей с GPU")
+    Component(load_balancer, "Model Load Balancer", "Go", "Балансировка запросов между GPU")
+    Component(batch_processor, "Batch Processor", "Python", "Батчинг фреймов для оптимизации")
+    Component(result_aggregator, "Result Aggregator", "Python", "Агрегация результатов инференса")
+    Component(ab_controller, "A/B Test Controller", "Python", "Управление A/B тестами моделей")
+    Component(model_registry, "Model Registry", "Python/MLflow", "Версионирование моделей")
+    Component(metrics_collector, "Metrics Collector", "Go/Prometheus", "Сбор метрик производительности")
+    
+    ComponentDb(model_cache, "Model Cache", "Redis", "Кэш результатов инференса")
+}
+
+Container_Ext(video_ingest, "Video Ingest Service", "Go", "Прием видеопотоков")
+Container_Ext(detection_svc, "Detection Service", "Python", "Оркестрация детекции")
+ContainerDb_Ext(s3, "S3", "Object Storage", "Хранилище моделей")
+System_Ext(training_pipeline, "Training Pipeline", "Kubeflow", "Обучение моделей")
+
+' Connections
+Rel(video_ingest, batch_processor, "Фреймы для инференса", "gRPC")
+Rel(batch_processor, load_balancer, "Батчи фреймов", "gRPC")
+Rel(load_balancer, model_server, "Запросы к моделям", "gRPC")
+Rel(model_server, result_aggregator, "Результаты детекции", "gRPC")
+Rel(result_aggregator, detection_svc, "Агрегированные результаты", "gRPC")
+Rel(result_aggregator, model_cache, "Кэширование результатов", "Redis protocol")
+Rel(ab_controller, load_balancer, "Правила A/B тестов", "Config")
+Rel(model_registry, model_server, "Загрузка моделей", "Model loading")
+Rel(model_registry, s3, "Чтение моделей", "S3 API")
+Rel(training_pipeline, model_registry, "Регистрация новых моделей", "REST API")
+Rel(model_server, metrics_collector, "Метрики инференса", "Prometheus")
+Rel(metrics_collector, model_cache, "Кэш метрик", "Redis protocol")
+
+note right of model_server
+  **TensorFlow Serving:**
+  • Multi-GPU support
+  • Dynamic batching
+  • Model versioning
+  • REST + gRPC API
+  • Latency: ~100-200ms/batch
+end note
+
+note left of ab_controller
+  **A/B Testing:**
+  • Canary deployments
+  • Traffic splitting (90/10)
+  • Automatic rollback
+  • Metrics comparison
+end note
+
+@enduml

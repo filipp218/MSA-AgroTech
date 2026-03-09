@@ -1,0 +1,131 @@
+@startuml C2_Customer_Integration_Example
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C2 - Пример интеграции клиента "АгроХолдинг У"\nИнтеграция с SaaS-платформой
+
+Person(operator, "Оператор АгроХолдинга", "Работает с инцидентами через mobile app")
+Person(analyst, "Аналитик АгроХолдинга", "Анализирует данные в своей BI-системе")
+Person(tech_lead, "Тех. Директор", "Настраивает интеграции, управляет API keys")
+
+System_Boundary(customer_systems, "Внутренние системы АгроХолдинга Русь (Tenant ID: agro-rus-001)") {
+    Container(customer_erp, "ERP Система", "1C:Предприятие 8", "Учет животных, корма, финансы")
+    Container(customer_bi, "BI Dashboard", "Power BI", "Аналитика по фермам, KPI")
+    Container(custom_portal, "Внутренний портал", "React", "Единая точка доступа для сотрудников")
+    Container(integration_service, "Integration Service", "Python/FastAPI", "Адаптер для интеграции с SaaS API")
+    Container(webhook_receiver, "Webhook Receiver", "Node.js/Express", "Прием webhooks от SaaS")
+    ContainerDb(customer_db, "Локальная БД", "PostgreSQL", "Кэш данных из SaaS, исторические данные")
+}
+
+System_Boundary(farms, "Фермы АгроХолдинга Русь") {
+    System_Boundary(farm1, "Ферма #1 (Воронежская обл.)") {
+        Container(edge1, "Edge Agent #1", "Go", "tenant_id: agro-rus-001")
+        Container(video1, "Video Analytics", "ONNX", "5 камер, 200 свиней")
+        Container(iot1, "IoT Adapter", "Go", "3 кормушки, 2 поилки")
+    }
+    
+    System_Boundary(farm2, "Ферма #2 (Липецкая обл.)") {
+        Container(edge2, "Edge Agent #2", "Go", "tenant_id: agro-rus-001")
+        Container(video2, "Video Analytics", "ONNX", "8 камер, 350 свиней")
+        Container(iot2, "IoT Adapter", "Go", "5 кормушек, 3 поилки")
+    }
+    
+    System_Boundary(farm3, "Ферма #3 (Тамбовская обл.)") {
+        Container(edge3, "Edge Agent #3", "Go", "tenant_id: agro-rus-001")
+        Container(video3, "Video Analytics", "ONNX", "6 камер, 280 свиней")
+        Container(iot3, "IoT Adapter", "Go", "4 кормушки, 2 поилки")
+    }
+}
+
+System_Boundary(saas, "SaaS Платформа Мониторинга") {
+    Container(public_api, "Public API Gateway", "Kong", "REST/GraphQL API, rate limit: 10k req/hour")
+    Container(webhook_service, "Webhook Manager", "Go", "Отправка событий клиенту")
+    Container(tenant_gateway, "Tenant Gateway", "Kong", "Прием данных от Edge")
+    Container(dev_portal, "Developer Portal", "Backstage", "Документация API, ключи доступа")
+    Container(incident_api, "Incident Service API", "Java/Spring", "CRUD инцидентов для tenant")
+    Container(metrics_api, "Metrics Service API", "Go", "Экспорт метрик и аналитики")
+    ContainerDb(saas_db, "Tenant DB", "PostgreSQL", "БД клиента agro-rus-001")
+}
+
+System_Ext(mobile_app, "Mobile App SaaS", "Flutter", "Мобильное приложение платформы")
+
+Rel(operator, mobile_app, "Просмотр инцидентов", "HTTPS")
+Rel(operator, custom_portal, "Работа через портал", "HTTPS")
+Rel(analyst, customer_bi, "Анализ данных", "Power BI Desktop")
+Rel(tech_lead, dev_portal, "Управление API keys", "HTTPS")
+Rel(tech_lead, custom_portal, "Настройка интеграций", "HTTPS")
+
+Rel(integration_service, public_api, "REST API вызовы", "HTTPS + API Key")
+Rel(public_api, incident_api, "GET /incidents, POST /incidents/:id/confirm", "HTTP")
+Rel(public_api, metrics_api, "GET /metrics, GET /analytics", "HTTP")
+Rel(incident_api, saas_db, "Query tenant data", "JDBC")
+Rel(metrics_api, saas_db, "Query metrics", "SQL")
+
+Rel(webhook_service, webhook_receiver, "POST webhooks", "HTTPS + signature")
+Rel(webhook_receiver, customer_db, "Сохранение событий", "SQL")
+Rel(webhook_receiver, customer_erp, "Обновление учета", "REST API")
+
+Rel(custom_portal, integration_service, "Запросы к SaaS API", "REST")
+Rel(integration_service, customer_db, "Кэширование данных", "SQL")
+Rel(customer_bi, customer_db, "Чтение аналитики", "SQL")
+Rel(customer_erp, integration_service, "Синхронизация справочников", "REST")
+
+Rel(edge1, tenant_gateway, "Sync events + tenant_id", "MQTT/TLS")
+Rel(edge2, tenant_gateway, "Sync events + tenant_id", "MQTT/TLS")
+Rel(edge3, tenant_gateway, "Sync events + tenant_id", "MQTT/TLS")
+Rel(tenant_gateway, saas_db, "Write tenant data", "Multi-DB routing")
+
+Rel(video1, edge1, "События детекции", "MQTT")
+Rel(iot1, edge1, "IoT телеметрия", "MQTT")
+Rel(video2, edge2, "События детекции", "MQTT")
+Rel(iot2, edge2, "IoT телеметрия", "MQTT")
+Rel(video3, edge3, "События детекции", "MQTT")
+Rel(iot3, edge3, "IoT телеметрия", "MQTT")
+
+Rel(mobile_app, public_api, "User requests", "HTTPS + JWT")
+
+note right of public_api
+  **API Features для клиента:**
+  • GET /api/v1/incidents?farm_id=...
+  • POST /api/v1/incidents/:id/confirm
+  • GET /api/v1/metrics/daily
+  • GET /api/v1/farms/:id/status
+  • WebSocket /ws/incidents (real-time)
+  
+  **Authentication:**
+  • API Key: agro-rus-001-***
+  • Rate limit: 10,000 req/hour (Pro plan)
+end note
+
+note left of webhook_receiver
+  **Webhooks от SaaS:**
+  
+  POST https://api.agrorus.ru/webhooks/saas
+  
+  Events:
+  • incident.created
+  • incident.confirmed
+  • animal.crush.detected
+  • feed.low_level
+  • device.offline
+  
+  Signature: HMAC-SHA256
+end note
+
+note bottom of integration_service
+  **Integration Patterns:**
+  
+  1. **Pull (Polling):**
+     Каждые 5 мин запрашивает новые инциденты
+  
+  2. **Push (Webhooks):**
+     SaaS отправляет критичные события
+  
+  3. **Sync:**
+     Справочники (животные, устройства)
+     синхронизируются 1 раз в день
+end note
+
+
+@enduml

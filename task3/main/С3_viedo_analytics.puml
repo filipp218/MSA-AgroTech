@@ -1,0 +1,49 @@
+@startuml C3_Video_Analytics_Edge
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+LAYOUT_WITH_LEGEND()
+title C3 - Video Analytics (Edge-First)\nВидеоаналитика на ферме
+Container_Boundary(analytics, "Video Analytics Engine") {
+    Component(stream_reader, "Stream Reader", "Python/OpenCV", "Читает RTSP потоки, декодирует фреймы")
+    Component(preprocessor, "Frame Preprocessor", "Python/NumPy", "Нормализация, ресайз, батчинг фреймов")
+    Component(detector, "Object Detector", "ONNX Runtime", "Детекция животных на фреймах")
+    Component(tracker, "Multi-Object Tracker", "Python/SORT", "Отслеживание животных между фреймами")
+    Component(behavior_analyzer, "Behavior Analyzer", "Python", "Анализ поведения: драки, давка, болезнь")
+    Component(counter, "Animal Counter", "Python", "Подсчет поголовья")
+    Component(event_publisher, "Event Publisher", "Python/Paho MQTT", "Публикация событий в MQTT")
+    Component(model_manager, "Model Manager", "Python", "Загрузка и обновление ONNX моделей")
+    
+    ComponentDb(frame_buffer, "Frame Buffer", "Redis", "Кратковременный буфер фреймов")
+    ComponentDb(model_storage, "Model Storage", "File System", "Локальное хранилище ONNX моделей")
+}
+System_Ext(cameras, "IP-камеры", "RTSP/ONVIF источники")
+Container_Ext(mqtt_broker, "MQTT Broker", "Mosquitto", "Локальная шина событий")
+Container_Ext(edge_db, "InfluxDB", "Time Series DB", "Метрики производительности")
+
+Rel(cameras, stream_reader, "RTSP потоки", "RTSP")
+Rel(stream_reader, frame_buffer, "Сохранение фреймов", "Redis protocol")
+Rel(frame_buffer, preprocessor, "Чтение фреймов", "Redis protocol")
+Rel(preprocessor, detector, "Предобработанные фреймы", "In-memory")
+Rel(detector, tracker, "Bbox координаты", "In-memory")
+Rel(tracker, behavior_analyzer, "Треки животных", "In-memory")
+Rel(tracker, counter, "Треки животных", "In-memory")
+Rel(behavior_analyzer, event_publisher, "События (драки, давка)", "In-memory")
+Rel(counter, event_publisher, "Подсчет поголовья", "In-memory")
+Rel(event_publisher, mqtt_broker, "Публикация событий", "MQTT")
+Rel(model_manager, model_storage, "Чтение/запись моделей", "File I/O")
+Rel(model_manager, detector, "Обновление моделей", "Hot reload")
+Rel(event_publisher, edge_db, "Метрики задержек", "InfluxDB Line Protocol")
+note right of detector
+  **ONNX Runtime:**
+  • GPU acceleration (CUDA)
+  • Inference <50ms/frame
+  • Батчинг до 8 фреймов
+  • Модели: YOLOv8, EfficientDet
+end note
+note left of behavior_analyzer
+  **Анализ поведения:**
+  • Детекция драк (по траекториям)
+  • Давка поросят (плотность)
+  • Болезни (неестественные позы)
+  • Правила на основе FSM
+end note
+@enduml

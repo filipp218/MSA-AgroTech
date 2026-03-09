@@ -1,0 +1,57 @@
+@startuml C1_SaaS_Platform_Context
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+LAYOUT_WITH_LEGEND()
+title C1 - SaaS-платформа мониторинга скота\nФинальное решение To-Be
+
+Person(customer_admin, "Администратор клиента", "Управляет аккаунтом, подписками, настройками")
+Person(customer_operator, "Оператор клиента", "Работает с инцидентами на фермах")
+Person(customer_developer, "Разработчик клиента", "Интегрирует с внутренними системами")
+Person(platform_admin, "Администратор платформы", "Управляет клиентами, тарифами, инфраструктурой")
+
+System(saas_platform, "SaaS-платформа мониторинга", "Мультитенантная платформа для мониторинга животных с видеоаналитикой, IoT и биллингом")
+
+System_Boundary(customer_farms, "Фермы клиентов") {
+    System_Ext(edge_agents, "Edge-агенты на фермах", "Видеоаналитика, IoT-управление, автономная работа")
+    System_Ext(cameras, "IP-камеры", "Видеопотоки RTSP/ONVIF")
+    System_Ext(iot_devices, "IoT-устройства", "Кормушки, поилки, датчики")
+}
+
+System_Ext(developer_portal, "Developer Portal", "Документация API, SDK, примеры интеграций")
+System_Ext(payment_systems, "Платежные системы", "ЮKassa, CloudPayments, Tinkoff")
+System_Ext(customer_erp, "ERP/BI системы клиентов", "1C, SAP, внутренние системы учета")
+System_Ext(notification_gw, "Шлюз уведомлений", "SMS, Email, Push, Telegram")
+System_Ext(ml_provider, "ML Provider", "Поставка и обновление моделей детекции")
+
+Rel(customer_admin, saas_platform, "Управляет аккаунтом, просматривает биллинг", "HTTPS/Web")
+Rel(customer_operator, saas_platform, "Работает с инцидентами", "HTTPS/Mobile/Web")
+Rel(customer_developer, developer_portal, "Изучает API, получает ключи", "HTTPS")
+Rel(customer_developer, saas_platform, "Интегрируется через Public API", "REST/WebSocket/Webhooks")
+Rel(platform_admin, saas_platform, "Управляет платформой", "HTTPS/Admin Console")
+Rel(cameras, edge_agents, "Видеопотоки", "RTSP")
+Rel(iot_devices, edge_agents, "Телеметрия и команды", "MQTT/Modbus")
+Rel(edge_agents, saas_platform, "Синхронизация событий, метрик", "MQTT/HTTPS TLS")
+Rel(saas_platform, payment_systems, "Обработка платежей", "REST API")
+Rel(saas_platform, notification_gw, "Отправка оповещений", "REST/SMPP")
+Rel(saas_platform, customer_erp, "Экспорт данных через API", "REST/Events")
+Rel(saas_platform, ml_provider, "Обновление ML-моделей", "Model Registry")
+Rel(saas_platform, edge_agents, "OTA обновления, конфигурация", "HTTPS")
+
+note right of saas_platform
+  **SaaS Features:**
+  • Мультитенантность (изоляция данных)
+  • Flexible подписки (Basic/Pro/Enterprise)
+  • Public API для интеграций
+  • Usage metering и биллинг
+  • Self-service панель управления
+  • Developer Portal
+  • Горизонтальное масштабирование
+end note
+note left of edge_agents
+  **Edge-First подход:**
+  • Автономная работа без интернета
+  • Локальная видеоаналитика <5 сек
+  • Буферизация данных до 48ч
+  • Синхронизация с облаком
+end note
+
+@enduml

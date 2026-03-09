@@ -1,0 +1,87 @@
+@startuml C2_Edge_First_Containers
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C2 - Edge-First архитектура\nMVP Платформы мониторинга скота
+
+Person(operator, "Оператор", "Работает с инцидентами")
+Person(admin, "Администратор", "Настраивает систему")
+
+System_Boundary(edge, "Edge-контур (на каждой ферме)") {
+    Container(edge_broker, "MQTT Broker", "Mosquitto/EMQX", "Локальная шина сообщений, буферизация при офлайне")
+    Container(video_ai, "Video Analytics Engine", "Python/OpenCV/ONNX Runtime", "ML-инференс: детекция драк, давки, болезней, подсчет")
+    Container(iot_adapter, "IoT Adapter", "Go", "Коннекторы к кормушкам/поилкам (OPC-UA, Modbus, MQTT)")
+    Container(edge_sync, "Edge Sync Agent", "Go", "Синхронизация с центром, буфер событий, офлайн-режим")
+    Container(local_alert, "Local Alerter", "Python", "Критичные локальные оповещения (SMS/звонок дежурному)")
+    ContainerDb(edge_db, "Time Series DB", "InfluxDB Lite", "Локальный кэш метрик и событий (48ч)")
+}
+
+System_Boundary(central, "Центральная платформа") {
+    Container(api_gw, "API Gateway", "Kong/Envoy", "REST/GraphQL, rate limiting, JWT validation")
+    Container(iam, "IAM Service", "Keycloak", "OIDC/OAuth2, RBAC, аудит")
+    
+    Container(event_bus, "Event Bus", "RabbitMQ + MQTT plugin", "Шина событий, топики инцидентов")
+    
+    Container(incident_svc, "Incident Service", "Java/Spring", "Управление инцидентами, workflow подтверждения")
+    Container(alert_svc, "Alert Service", "Python/Celery", "Маршрутизация и эскалация оповещений")
+    Container(metrics_svc, "Metrics Service", "Go", "Агрегация метрик, экспорт (Prometheus/OpenMetrics)")
+    Container(sync_svc, "Farm Sync Service", "Go", "Координация edge-агентов, конфликты синхронизации")
+    
+    ContainerDb(pg_db, "PostgreSQL", "PostgreSQL 15", "Инциденты, конфигурация, пользователи")
+    ContainerDb(tsdb, "Time Series DB", "TimescaleDB", "Телеметрия, метрики, история")
+    ContainerDb(blob_storage, "Object Storage", "MinIO/S3", "Видео-фрагменты, снимки инцидентов")
+    
+    Container(web_app, "Web/Mobile App", "React/Flutter", "UI для операторов и админов")
+}
+
+System_Ext(cameras, "IP-камеры", "RTSP/ONVIF")
+System_Ext(iot_devices, "IoT устройства", "Кормушки, датчики")
+System_Ext(notification_gw, "Notification Gateway", "SMS/Push/Email")
+System_Ext(bi_systems, "BI/ERP", "Внешние системы")
+
+' Edge connections
+Rel(cameras, video_ai, "RTSP видеопотоки", "RTSP")
+Rel(iot_devices, iot_adapter, "Телеметрия, команды", "Modbus/OPC-UA")
+Rel(video_ai, edge_broker, "События детекции", "MQTT")
+Rel(iot_adapter, edge_broker, "IoT события", "MQTT")
+Rel(edge_broker, local_alert, "Критичные события", "MQTT subscribe")
+Rel(edge_broker, edge_db, "Буферизация метрик", "Native protocol")
+Rel(edge_sync, edge_broker, "Сбор событий для синхронизации", "MQTT")
+Rel(edge_sync, event_bus, "Синхронизация событий (задержка до 10 мин)", "MQTT over TLS")
+
+' Central connections
+Rel(operator, web_app, "Работа с UI", "HTTPS")
+Rel(admin, web_app, "Админ-панель", "HTTPS")
+Rel(web_app, api_gw, "REST/GraphQL", "HTTPS")
+Rel(api_gw, iam, "Проверка токенов", "gRPC")
+Rel(api_gw, incident_svc, "API вызовы", "HTTP/gRPC")
+
+Rel(event_bus, incident_svc, "События инцидентов", "AMQP")
+Rel(event_bus, alert_svc, "Триггеры алертов", "AMQP")
+Rel(event_bus, metrics_svc, "Метрики для экспорта", "AMQP")
+Rel(event_bus, sync_svc, "Синхронизация состояния ферм", "AMQP")
+
+Rel(incident_svc, pg_db, "CRUD инцидентов", "JDBC")
+Rel(alert_svc, notification_gw, "Отправка уведомлений", "REST/SMPP")
+Rel(metrics_svc, tsdb, "Запись метрик", "Native protocol")
+Rel(incident_svc, blob_storage, "Сохранение видео", "S3 API")
+Rel(metrics_svc, bi_systems, "Экспорт метрик", "REST/Events")
+
+note right of video_ai
+  **ML Stack:**
+  • ONNX модели для GPU inference
+  • OpenCV для препроцессинга
+  • Детекция в <100ms
+  • Локальное обновление моделей
+end note
+
+note left of event_bus
+  **RabbitMQ Выбор:**
+  ✅ MQTT plugin для edge
+  ✅ Кластеризация (HA)
+  ✅ Низкие требования к ресурсам
+  ⚠️ При >10k msg/sec → Kafka
+end note
+
+@enduml
