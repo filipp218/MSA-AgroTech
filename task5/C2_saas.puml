@@ -1,0 +1,121 @@
+@startuml C2_SaaS_Platform_Final
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C2 - Финальная архитектура SaaS-платформы\nEdge-First с мультитенантностью и биллингом
+
+Person(customer, "Клиент (Customer)", "Агрохолдинг")
+Person(developer, "Разработчик клиента", "API интеграции")
+Person(platform_admin, "Platform Admin", "Управление платформой")
+
+System_Boundary(edge, "Edge контур (на каждой ферме клиента)") {
+    Container(edge_agent, "Edge Agent", "Go", "Синхронизация с SaaS, tenant context")
+    Container(video_analytics, "Video Analytics Engine", "Python/ONNX", "ML-инференс на GPU")
+    Container(iot_adapter, "IoT Adapter", "Go", "Управление устройствами")
+    Container(local_alerter, "Local Alerter", "Python", "Критичные локальные уведомления")
+    ContainerDb(edge_db, "InfluxDB", "Time Series", "Локальный кэш метрик (48ч)")
+    Container(mqtt_broker, "MQTT Broker", "Mosquitto", "Локальная шина событий")
+}
+
+System_Boundary(tenant_layer, "Tenant Management Layer") {
+    Container(tenant_gateway, "Multi-tenant API Gateway", "Kong Enterprise", "Tenant routing, rate limiting, JWT validation")
+    Container(tenant_registry, "Tenant Registry", "Go", "Управление клиентами, маппинг tenant → ресурсы")
+    Container(onboarding_svc, "Onboarding Service", "Java/Spring", "Регистрация новых клиентов, provisioning")
+    ContainerDb(tenant_db, "Tenant DB", "PostgreSQL", "Информация о клиентах, конфигурация")
+}
+
+System_Boundary(core, "Core Services") {
+    Container(incident_svc, "Incident Service", "Java/Spring", "Управление инцидентами (tenant-aware)")
+    Container(alert_svc, "Alert Service", "Python/Celery", "Маршрутизация оповещений")
+    Container(metrics_svc, "Metrics Service", "Go", "Агрегация метрик по tenant")
+    Container(sync_svc, "Farm Sync Service", "Go", "Координация edge-агентов")
+    Container(iam_svc, "IAM Service", "Keycloak", "Аутентификация, RBAC, multi-tenancy")
+    ContainerDb(core_db, "Core PostgreSQL", "PostgreSQL", "Инциденты, метрики (DB per Tenant)")
+    ContainerDb(tsdb, "TimescaleDB", "Time Series", "Телеметрия по всем клиентам")
+}
+
+System_Boundary(billing_layer, "Billing & Subscription Layer") {
+    Container(subscription_svc, "Subscription Service", "Java/Spring", "Управление подписками, тарифами")
+    Container(usage_metering, "Usage Metering Service", "Go", "Сбор метрик использования (events, farms, users)")
+    Container(billing_svc, "Billing Service", "Java/Spring", "Расчет счетов, invoicing")
+    Container(payment_gateway, "Payment Gateway", "Go", "Интеграция с платежными системами")
+    ContainerDb(billing_db, "Billing DB", "PostgreSQL", "Подписки, счета, транзакции")
+    ContainerDb(clickhouse, "ClickHouse", "Analytics DB", "Usage события для биллинга и аналитики")
+}
+
+System_Boundary(integration, "Customer Integration Layer") {
+    Container(public_api_gw, "Public API Gateway", "Kong", "REST/GraphQL API для клиентов, rate limiting")
+    Container(webhook_manager, "Webhook Manager", "Go", "Отправка событий в системы клиентов")
+    Container(dev_portal, "Developer Portal", "React/Backstage", "Документация, API keys, examples")
+}
+
+Container(event_bus, "Event Bus", "RabbitMQ Cluster", "Шина событий с tenant context в headers")
+
+ContainerDb(blob_storage, "Object Storage", "MinIO/S3", "Видео-снимки, ML-модели (tenant-isolated)")
+
+System_Ext(cameras, "IP-камеры", "RTSP")
+System_Ext(iot_devices, "IoT-устройства", "Кормушки, поилки")
+System_Ext(payment_systems, "Платежные системы", "ЮKassa, CloudPayments")
+System_Ext(notification_gw, "Notification Gateway", "SMS/Push")
+System_Ext(customer_systems, "Системы клиента", "ERP/BI")
+
+Rel(cameras, video_analytics, "RTSP потоки", "RTSP")
+Rel(iot_devices, iot_adapter, "Телеметрия", "MQTT/Modbus")
+Rel(video_analytics, mqtt_broker, "События детекции", "MQTT")
+Rel(iot_adapter, mqtt_broker, "IoT события", "MQTT")
+Rel(mqtt_broker, local_alerter, "Критичные события", "MQTT")
+Rel(mqtt_broker, edge_db, "Метрики", "Write")
+Rel(edge_agent, mqtt_broker, "Сбор событий", "MQTT")
+Rel(edge_agent, tenant_gateway, "Синхронизация с tenant_id", "MQTT/HTTPS + TLS")
+Rel(customer, tenant_gateway, "Web/Mobile UI", "HTTPS")
+Rel(developer, public_api_gw, "Public API вызовы", "REST/GraphQL")
+Rel(platform_admin, tenant_registry, "Управление клиентами", "Admin UI")
+Rel(tenant_gateway, tenant_registry, "Resolve tenant", "gRPC")
+Rel(tenant_gateway, iam_svc, "JWT validation", "gRPC")
+Rel(tenant_gateway, incident_svc, "Tenant-aware requests", "HTTP")
+Rel(tenant_gateway, metrics_svc, "Tenant-aware requests", "HTTP")
+Rel(onboarding_svc, tenant_db, "CRUD клиентов", "SQL")
+Rel(onboarding_svc, subscription_svc, "Создание подписки", "gRPC")
+Rel(tenant_registry, tenant_db, "Read tenant config", "SQL")
+Rel(event_bus, incident_svc, "События инцидентов", "AMQP + tenant_id")
+Rel(event_bus, alert_svc, "Триггеры алертов", "AMQP")
+Rel(event_bus, metrics_svc, "Метрики", "AMQP")
+Rel(event_bus, usage_metering, "Usage события", "AMQP")
+Rel(incident_svc, core_db, "Tenant-specific DB", "JDBC")
+Rel(metrics_svc, tsdb, "Запись метрик с tenant_id", "SQL")
+Rel(alert_svc, notification_gw, "Отправка уведомлений", "REST")
+Rel(incident_svc, blob_storage, "Сохранение видео", "S3 API")
+Rel(usage_metering, clickhouse, "Запись usage событий", "Native protocol")
+Rel(billing_svc, clickhouse, "Агрегация usage", "SQL")
+Rel(billing_svc, subscription_svc, "Проверка тарифа", "gRPC")
+Rel(billing_svc, billing_db, "Создание счетов", "JDBC")
+Rel(subscription_svc, billing_db, "CRUD подписок", "JDBC")
+Rel(payment_gateway, payment_systems, "Обработка платежей", "REST API")
+Rel(billing_svc, payment_gateway, "Запрос оплаты", "REST")
+Rel(public_api_gw, iam_svc, "Validate API keys", "gRPC")
+Rel(public_api_gw, incident_svc, "API requests", "HTTP")
+Rel(public_api_gw, metrics_svc, "API requests", "HTTP")
+Rel(webhook_manager, customer_systems, "Webhooks", "HTTPS")
+Rel(event_bus, webhook_manager, "События для webhooks", "AMQP")
+Rel(developer, dev_portal, "Docs, API keys", "HTTPS")
+Rel(dev_portal, iam_svc, "Генерация API keys", "REST")
+
+note right of tenant_gateway
+  **Multi-tenancy:**
+  • Tenant ID из JWT/API key
+  • Rate limiting per tenant
+  • Tenant routing к нужной БД
+  • Row-level security
+end note
+
+note bottom of public_api_gw
+  **Public API:**
+  • REST: CRUD операции
+  • GraphQL: сложные запросы
+  • WebSocket: real-time события
+  • Webhooks: push уведомления
+  • Rate limit: tier-based
+end note
+
+@enduml

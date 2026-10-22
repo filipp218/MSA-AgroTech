@@ -1,0 +1,97 @@
+@startuml C2_Cloud_First_Containers
+
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+LAYOUT_WITH_LEGEND()
+title C2 -Cloud-First архитектура\nMVP Платформы мониторинга скота
+
+Person(operator, "Оператор", "Работает с инцидентами")
+Person(admin, "Администратор", "Настраивает систему")
+System_Boundary(edge, "Edge-прокси (на каждой ферме)") {
+    Container(stream_proxy, "Video Stream Proxy", "Go/FFmpeg", "Буферизация и стриминг видео в облако")
+    Container(iot_gateway, "IoT Gateway", "Go", "Агрегация телеметрии, локальное управление IoT")
+    Container(fallback_alerter, "Fallback Alerter", "Python", "Базовые пороговые алерты при офлайне")
+    ContainerDb(edge_buffer, "Ring Buffer", "Redis", "Буфер видео/событий (48ч)")
+}
+System_Boundary(cloud, "Центральная облачная платформа") {
+    Container(api_gw, "API Gateway", "Kong", "REST/GraphQL, JWT, rate limiting")
+    Container(iam, "IAM Service", "Auth0/Keycloak", "OIDC, RBAC")
+    
+    Container(video_ingest, "Video Ingest Service", "Go/FFmpeg", "Прием видеопотоков от ферм")
+    Container(ml_platform, "ML Platform", "Python/TensorFlow Serving", "GPU-кластер для видеоаналитики")
+    Container(detection_svc, "Detection Service", "Python", "Оркестрация ML-инференса, батчинг")
+    
+    Container(event_stream, "Event Stream", "Apache Kafka", "Высоконагруженная шина событий")
+    
+    Container(incident_svc, "Incident Service", "Java/Spring", "Управление инцидентами")
+    Container(alert_svc, "Alert Service", "Go", "Маршрутизация оповещений")
+    Container(iot_svc, "IoT Management Service", "Go", "Управление устройствами, команды")
+    Container(metrics_svc, "Metrics Service", "Go", "Агрегация и экспорт метрик")
+    Container(analytics_svc, "Analytics Service", "Python/Pandas", "Долгосрочная аналитика, тренды")
+    
+    ContainerDb(pg_db, "PostgreSQL", "PostgreSQL 15 (RDS)", "Инциденты, конфигурация")
+    ContainerDb(timescale, "TimescaleDB", "TimescaleDB Cloud", "Телеметрия")
+    ContainerDb(redis, "Redis", "Redis Cluster", "Кэш, сессии")
+    ContainerDb(s3, "Object Storage", "S3", "Видеоархив, модели ML")
+    
+    Container(web_app, "Web/Mobile App", "React/Flutter", "UI для операторов")
+}
+System_Ext(cameras, "IP-камеры", "RTSP/ONVIF")
+System_Ext(iot_devices, "IoT устройства", "Кормушки, датчики")
+System_Ext(notification_gw, "Notification Gateway", "Twilio/SNS")
+System_Ext(bi_systems, "BI/ERP", "Внешние системы")
+' Edge connections
+Rel(cameras, stream_proxy, "RTSP потоки", "RTSP")
+Rel(iot_devices, iot_gateway, "Телеметрия", "MQTT/Modbus")
+Rel(stream_proxy, video_ingest, "Стриминг в облако", "WebRTC/RTMP")
+Rel(stream_proxy, edge_buffer, "Буферизация при офлайне", "Write")
+Rel(iot_gateway, iot_svc, "Телеметрия, команды", "MQTT over TLS")
+Rel(iot_gateway, fallback_alerter, "Локальные метрики", "Internal")
+' Cloud connections
+Rel(operator, web_app, "HTTPS", "HTTPS")
+Rel(web_app, api_gw, "REST/GraphQL", "HTTPS")
+Rel(api_gw, iam, "Проверка токенов", "gRPC")
+Rel(api_gw, incident_svc, "Запросы инцидентов", "HTTP/gRPC")
+Rel(api_gw, metrics_svc, "Запросы метрик", "HTTP/gRPC")
+Rel(api_gw, iot_svc, "Команды управления устройствами", "HTTP/gRPC")
+Rel(api_gw, analytics_svc, "Запросы аналитики и трендов", "HTTP/gRPC")
+Rel(admin, web_app, "Администрирование", "HTTPS")
+Rel(video_ingest, ml_platform, "Фреймы для инференса", "gRPC")
+Rel(ml_platform, detection_svc, "Результаты детекции", "gRPC")
+Rel(detection_svc, event_stream, "События инцидентов", "Kafka")
+Rel(event_stream, incident_svc, "Инциденты", "Kafka Consumer")
+Rel(event_stream, alert_svc, "Триггеры алертов", "Kafka Consumer")
+Rel(event_stream, metrics_svc, "Метрики", "Kafka Consumer")
+Rel(event_stream, analytics_svc, "Агрегация", "Kafka Consumer")
+Rel(incident_svc, pg_db, "CRUD", "JDBC")
+Rel(iot_svc, timescale, "Запись телеметрии", "SQL")
+Rel(alert_svc, notification_gw, "Отправка SMS/Push", "REST")
+Rel(video_ingest, s3, "Архивация видео", "S3 API")
+Rel(ml_platform, s3, "Загрузка моделей", "S3 API")
+Rel(metrics_svc, bi_systems, "Экспорт", "REST/Events")
+Rel(api_gw, redis, "Кэш, rate limiting", "Redis protocol")
+
+note right of ml_platform
+  **Централизованная ML:**
+  ✅ GPU-кластер (эластичность)
+  ✅ Единое управление моделями
+  ✅ A/B тестирование
+  ⚠️ Задержка: 10-30 сек
+end note
+note left of event_stream
+  **Kafka Выбор:**
+  ✅ Высокая пропускная способность
+  ✅ Долгосрочное хранение событий
+  ✅ Stream processing
+  ⚠️ Требует больше ресурсов
+end note
+note bottom of api_gw
+  **API Gateway функции:**
+  • Единая точка входа для клиентов
+  • Маршрутизация к backend-сервисам
+  • JWT валидация через IAM
+  • Rate limiting (Redis)
+  • Request/Response трансформация
+  • Кэширование частых запросов
+  • Distributed tracing
+end note
+@enduml

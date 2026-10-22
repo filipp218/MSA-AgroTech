@@ -1,0 +1,66 @@
+@startuml C1_Cloud_First_Solution
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+
+LAYOUT_WITH_LEGEND()
+
+title C1 - Cloud-First с гибридной обработкой\nMVP Платформы мониторинга скота
+
+Person(operator, "Оператор фермы", "Подтверждает инциденты, управляет кормлением/поением, получает алерты")
+Person(duty, "Дежурный сотрудник", "Получает fallback-оповещения при критичных событиях в офлайне")
+Person(admin, "Администратор системы", "Настраивает правила детекции, роли доступа, интеграции")
+
+System_Boundary(cloud, "Центральная облачная платформа") {
+  System(ml_platform, "ML-платформа", "GPU-кластер для видеоаналитики, детекция инцидентов, обучение моделей")
+  System(core_platform, "Ядро платформы", "Управление событиями, хранилище, API, аналитика, экспорт метрик")
+}
+System_Boundary(edge, "Edge-прокси (на каждой ферме)") {
+  System(edge_proxy, "Edge-прокси", "Буферизация видео/событий, базовые алерты в офлайне, управление IoT, агрегация")
+}
+System_Ext(cameras, "IP-камеры", "Разные производители: RTSP/ONVIF, ночной режим, высокое разрешение")
+System_Ext(iot_devices, "IoT-устройства", "Кормушки, поилки, датчики воды (OPC-UA, Modbus, MQTT)")
+System_Ext(notification, "Шлюз уведомлений", "SMS, Push, Email, Voice для критичных алертов")
+System_Ext(idp, "Identity Provider", "OIDC/OAuth2, централизованное управление доступом")
+System_Ext(bi_erp, "BI/ERP системы", "1C, аналитика, склад кормов, планирование")
+System_Ext(storage, "Object Storage", "S3-совместимое хранилище для архивов видео и снимков")
+
+Rel(operator, core_platform, "Работает с инцидентами через веб/мобильное приложение", "HTTPS/REST/GraphQL")
+Rel(duty, edge_proxy, "Получает критичные алерты при потере связи", "Local SMS/Buzzer")
+Rel(admin, core_platform, "Управляет правилами, моделями, доступами", "HTTPS/Admin Console")
+Rel(cameras, edge_proxy, "Видеопотоки для буферизации и передачи", "RTSP/ONVIF")
+Rel(iot_devices, edge_proxy, "Телеметрия и команды управления", "MQTT/OPC-UA/Modbus")
+Rel(edge_proxy, ml_platform, "Стриминг видео для анализа (при наличии связи)", "WebRTC/RTMP/HTTPS")
+Rel(edge_proxy, core_platform, "События, телеметрия IoT, метрики", "MQTT/HTTPS")
+Rel(ml_platform, core_platform, "Детектированные инциденты и метрики", "gRPC/Events")
+Rel(core_platform, notification, "Оповещения операторов о критичных событиях", "REST API/SMPP")
+Rel(core_platform, idp, "Аутентификация и авторизация", "OIDC/JWT")
+Rel(core_platform, bi_erp, "Экспорт метрик, события, отчеты", "REST API/Events/ETL")
+Rel(core_platform, storage, "Архивация видео-фрагментов и снимков", "S3 API")
+Rel(ml_platform, storage, "Обучающие датасеты и версии моделей", "S3 API")
+Rel(ml_platform, edge_proxy, "Обновление базовых правил детекции", "OTA/Config Push")
+
+note right of ml_platform
+  **Централизованная ML:**
+  • Высокопроизводительные GPU
+  • Единое управление моделями
+  • A/B тестирование детекторов
+  • Переобучение на новых данных
+  • Масштабирование по требованию
+end note
+note left of edge_proxy
+  **Облегченный Edge:**
+  • Буферизация видео (до 48ч)
+  • Базовые правила (пороги, счетчики)
+  • Fallback-алерты при офлайне
+  • Локальное управление IoT
+  • Агрегация метрик
+end note
+note bottom of core_platform
+  **Центральная платформа:**
+  • Единая точка наблюдаемости
+  • Долгосрочное хранилище (TSDB)
+  • REST/GraphQL API
+  • Роли и аудит
+  • Интеграции с BI/ERP
+end note
+
+@enduml

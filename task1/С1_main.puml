@@ -1,0 +1,58 @@
+@startuml C1_Edge_First_Solution
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
+LAYOUT_WITH_LEGEND()
+
+
+title С1 - Edge-First архитектура\nMVP Платформы мониторинга скота
+
+
+Person(operator, "Оператор фермы", "Подтверждает инциденты, управляет кормлением/поением, получает алерты")
+Person(duty, "Дежурный сотрудник", "Получает локальные оповещения при отсутствии интернета, первичное реагирование")
+Person(admin, "Администратор системы", "Настраивает камеры, агенты, роли доступа, правила синхронизации")
+
+System_Boundary(central, "Центральный контур") {
+  System(platform, "Платформа мониторинга скота", "Агрегация событий, долгосрочное хранение, аналитика, API для интеграций")
+}
+
+System_Boundary(edge, "Edge контур (на каждой ферме)") {
+  System(edge_agent, "Edge-Агент", "Видеоаналитика в реальном времени, управление IoT, локальные алерты, буферизация при офлайне")
+}
+
+System_Ext(cameras, "IP-камеры", "Разные производители: RTSP/ONVIF потоки, ночной режим, рыбий глаз")
+System_Ext(iot_devices, "IoT-устройства", "Кормушки, поилки, датчики воды (разные протоколы: OPC-UA, Modbus, MQTT)")
+
+System_Ext(notification, "Шлюз уведомлений", "SMS, Push, Email, Voice вызовы")
+System_Ext(idp, "Identity Provider", "Централизованная аутентификация: OIDC/OAuth2, RBAC")
+System_Ext(ml_partner, "ML Provider", "Поставка и обновление моделей детекции для видеоаналитики")
+System_Ext(bi_erp, "BI/ERP системы", "Существующие корпоративные системы: 1C, аналитика, склад кормов")
+
+Rel(operator, platform, "Работает с инцидентами, просматривает аналитику", "HTTPS/Web/Mobile App")
+Rel(duty, edge_agent, "Получает локальные алерты в офлайн-режиме", "Local notification/Buzzer")
+Rel(admin, platform, "Управляет конфигурацией, ролями, правилами", "HTTPS/Admin UI")
+Rel(cameras, edge_agent, "Передают видеопотоки для анализа", "RTSP/ONVIF")
+Rel(iot_devices, edge_agent, "Телеметрия и исполнение команд управления", "MQTT/OPC-UA/Modbus")
+Rel(edge_agent, platform, "Синхронизация событий и метрик (задержка до 10 мин при офлайне)", "MQTT/HTTPS/Events")
+Rel(platform, notification, "Отправка критичных оповещений операторам", "REST API/SMPP")
+Rel(platform, idp, "Проверка прав доступа и аутентификация", "OIDC/JWT")
+Rel(ml_partner, edge_agent, "Обновление ML-моделей для детекции", "Model Registry/OTA")
+Rel(platform, bi_erp, "Экспорт базовых и кастомных метрик", "REST API/Events/ETL")
+Rel(bi_erp, platform, "Справочные данные: нормы кормления, прогнозы", "REST API")
+
+note right of edge_agent
+  **Ключевые возможности Edge:**
+  • Видеоаналитика в миллисекундах
+  • Автономная работа без интернета
+  • Локальная буферизация событий
+  • Управление IoT в реальном времени
+  • Детекция: драки, давка, болезни, подсчет
+end note
+note left of platform
+  **Центральная платформа:**
+  • Агрегация данных со всех ферм
+  • Долгосрочное хранилище (TSDB)
+  • API для мобильных/веб приложений
+  • Экспорт метрик во внешние системы
+  • Централизованное управление правилами
+end note
+
+@enduml

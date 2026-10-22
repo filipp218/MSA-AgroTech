@@ -1,0 +1,76 @@
+@startuml C4_Object_Detector_Code
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title C4 - Object Detector (Edge-First)\nДетали реализации детектора объектов
+package "detector" {
+    class ONNXDetector {
+        - session: InferenceSession
+        - model_path: str
+        - input_shape: tuple
+        - conf_threshold: float
+        + __init__(model_path, device)
+        + load_model(): void
+        + detect(frame: np.array): List[Detection]
+        + preprocess(frame): np.array
+        + postprocess(output): List[Detection]
+        + get_metrics(): Dict
+    }
+    
+    class Detection {
+        + bbox: BoundingBox
+        + class_id: int
+        + confidence: float
+        + timestamp: datetime
+        + to_dict(): Dict
+    }
+    
+    class BoundingBox {
+        + x: int
+        + y: int
+        + width: int
+        + height: int
+        + area(): int
+        + iou(other: BoundingBox): float
+    }
+    
+    class ModelLoader {
+        + load_from_file(path: str): InferenceSession
+        + validate_model(session): bool
+        + get_input_shape(session): tuple
+    }
+    
+    interface IDetector {
+        + detect(frame): List[Detection]
+    }
+    
+    class DetectorFactory {
+        + create(model_type: str): IDetector
+    }
+}
+package "onnxruntime" <<external>> {
+    class InferenceSession {
+        + run(outputs, inputs): List
+    }
+}
+ONNXDetector ..|> IDetector
+ONNXDetector --> Detection : creates
+ONNXDetector --> InferenceSession : uses
+Detection --> BoundingBox : contains
+ONNXDetector --> ModelLoader : uses
+DetectorFactory --> ONNXDetector : creates
+note right of ONNXDetector
+  **Оптимизации:**
+  • Батчинг фреймов
+  • GPU inference через CUDA
+  • Model quantization (FP16)
+  • Input tensor pooling
+end note
+note left of Detection
+  **Пример:**
+  Detection(
+    bbox=BBox(100,200,50,80),
+    class_id=1, # pig
+    confidence=0.95,
+    timestamp=now()
+  )
+end note
+@enduml

@@ -1,0 +1,98 @@
+@startuml C4_Model_Server_Code
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml
+title C4 - Model Server (ML Platform)\nДетали реализации TensorFlow Serving
+package "model_server" {
+    class ModelServer {
+        - config: ServerConfig
+        - models: Dict[str, LoadedModel]
+        - gpu_pool: GPUPool
+        + serve_model(request: InferRequest): InferResponse
+        + load_model(model_path: str, version: int): void
+        + unload_model(model_name: str): void
+        + health_check(): Status
+        + get_metrics(): Dict
+    }
+    
+    class LoadedModel {
+        + name: str
+        + version: int
+        + graph: tf.Graph
+        + session: tf.Session
+        + input_tensors: List[Tensor]
+        + output_tensors: List[Tensor]
+        + warmup(): void
+        + predict(batch: np.array): np.array
+    }
+    
+    class InferRequest {
+        + model_name: str
+        + model_version: int
+        + inputs: Dict[str, np.array]
+        + timeout_ms: int
+        + to_proto(): ServingRequest
+    }
+    
+    class InferResponse {
+        + outputs: Dict[str, np.array]
+        + latency_ms: float
+        + model_version: int
+        + to_json(): Dict
+    }
+    
+    class GPUPool {
+        - devices: List[GPUDevice]
+        - allocations: Dict[str, GPUDevice]
+        + allocate(model: str): GPUDevice
+        + release(model: str): void
+        + get_available(): List[GPUDevice]
+    }
+    
+    class GPUDevice {
+        + device_id: int
+        + memory_mb: int
+        + utilization: float
+        + is_available(): bool
+    }
+    
+    class DynamicBatcher {
+        - batch_size: int
+        - timeout_ms: int
+        - queue: Queue[InferRequest]
+        + add_request(req: InferRequest): void
+        + get_batch(): List[InferRequest]
+        + flush(): void
+    }
+}
+package "tensorflow" <<external>> {
+    class Session {
+        + run(outputs, inputs): List
+    }
+    
+    class Graph {
+        + as_default(): Context
+    }
+}
+ModelServer --> LoadedModel : manages
+ModelServer --> GPUPool : uses
+ModelServer --> DynamicBatcher : uses
+ModelServer --> InferRequest : receives
+ModelServer --> InferResponse : returns
+LoadedModel --> Session : uses
+LoadedModel --> Graph : uses
+GPUPool --> GPUDevice : manages
+note right of ModelServer
+  **TensorFlow Serving API:**
+  • gRPC + REST endpoints
+  • Model versioning
+  • A/B traffic routing
+  • Dynamic batching
+  • GPU memory management
+end note
+note left of DynamicBatcher
+  **Batching Strategy:**
+  • Max batch size: 32
+  • Timeout: 50ms
+  • Increases throughput 4-8x
+  • Reduces GPU idle time
+end note
+@enduml
